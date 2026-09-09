@@ -1,0 +1,380 @@
+<!--
+Widget skillu tpv-znalostni-baze, workflow references/tvorba-technologickeho-postupu.md
+(Claude.ai Visualizer / show_widget nástroj).
+
+STAV: v5 — data zakázky jsou oddělená do JSON bloku (dřív to byly JS literály, kde
+uvozovka nebo apostrof v názvu zakázky rozbily celý skript). STATICKÁ část (katalog,
+HINTS, veškerá interakční logika) se NIKDY needituje; mění se výhradně obsah JSON
+elementu s id="order-data" v bloku "DYNAMICKÁ DATA ZAKÁZKY".
+Soubor se v repozitáři udržuje s PRÁZDNÝMI daty — když se str_replace nepovede, widget
+napíše, že data nebyla vyplněna, místo aby ukázal cizí zakázku jako aktuální.
+
+PŘED KAŽDÝM POUŽITÍM (dělej JEN cílenou úpravu bloku "DYNAMICKÁ DATA ZAKÁZKY",
+zbytek souboru nepřepisuj — šetří to tokeny):
+  1. orderDesc — jednořádkový popis aktuální zakázky (text nad vyhledáváním).
+  2. drafts / preselect — připrav předem na základě konverzace s uživatelem (widget
+     nemá živé spojení k AI, návrhy musí být hotové před vložením kódu).
+     preselect drž v pořadí, které zadal uživatel — widget ho nepřeskládává.
+  3. tppByOp — ověř/doplň podle aktuální knihovny T\TPP (může se změnit).
+  4. Po kliknutí na "Poslat ke kontrole a zpřesnění" widget zavolá sendPrompt() —
+     Claude MUSÍ obsah projít, strukturovat, opravit a ukázat náhled ke schválení
+     (tvorba-technologickeho-postupu.md, krok kontrola/cleanup), NE rovnou generovat
+     finální dokument.
+
+Použití: v Claude.ai chatu (ne Claude Code — widget je specifický pro chatové rozhraní),
+Claude:
+  a) zjistí základní údaje o zakázce konverzačně, případně z vyfocené fotky výrobního
+     příkazu (viz tvorba-technologickeho-postupu.md krok 1)
+  b) připraví drafts pro pravděpodobné operace na základě kontextu
+  c) udělá str_replace JEN na obsah JSON elementu s id="order-data"
+  d) ověří, že str_replace proběhl; pokud ne, widget nezobrazuje
+  e) načte celý (upravený) soubor a vloží jako widget_code do visualize:show_widget
+  f) uživatel může operace přeuspořádat šipkami ↑/↓ přímo ve widgetu
+  g) po sendPrompt zpět provede kontrolní/cleanup krok a ukáže náhled
+  h) po potvrzení převede přes scripts/md_to_docx.sh
+-->
+<div>
+<h2 class="sr-only">Průvodce sestavením technologického postupu — výběr operací, TPP odkazy a úprava textu</h2>
+
+<div id="step-search" style="padding: 1rem 0;">
+  <p id="order-desc" style="font-size:13px; color:var(--text-secondary); margin:0 0 12px;"></p>
+  <label style="font-size: 13px; color: var(--text-secondary); display:block; margin-bottom:6px;">Hledat a přidat operaci</label>
+  <input id="search" type="text" placeholder="např. broušení, frézování..." style="width:100%;" autocomplete="off" />
+  <div id="suggestions" style="margin-top:4px; border: 0.5px solid var(--border); border-radius: var(--radius); max-height: 220px; overflow-y:auto; display:none;"></div>
+
+  <div id="chips" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:1rem;"></div>
+
+  <button id="start-review" style="margin-top:1.25rem; display:none;">Projít operace a upravit &rarr;</button>
+</div>
+
+<div id="step-review" style="display:none; padding: 1rem 0;">
+  <div id="order-strip" style="display:flex; gap:6px; overflow-x:auto; padding-bottom:8px; margin-bottom:1rem;"></div>
+
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
+    <span id="progress" style="font-size:13px; color:var(--text-secondary);"></span>
+    <button id="back-to-search" style="font-size:13px;">Zpět na výběr</button>
+  </div>
+
+  <div style="background:var(--surface-1); border-radius:12px; padding:1rem 1.25rem;">
+    <p id="op-title" style="font-weight:500; font-size:16px; margin:0 0 4px;"></p>
+    <p id="op-hint" style="font-size:13px; color:var(--text-secondary); margin:0 0 12px;"></p>
+
+    <div id="tpp-block" style="display:none; margin-bottom:12px;">
+      <label style="font-size:13px; color:var(--text-secondary); display:block; margin-bottom:4px;">Odkaz na TPP z knihovny (volitelné)</label>
+      <input id="tpp-search" type="text" placeholder="hledat TPP..." style="width:100%;" autocomplete="off" />
+      <div id="tpp-suggestions" style="margin-top:4px; border: 0.5px solid var(--border); border-radius: var(--radius); max-height: 160px; overflow-y:auto; display:none;"></div>
+      <div id="tpp-selected" style="margin-top:6px; display:none; align-items:center; gap:6px; font-size:13px;"></div>
+    </div>
+
+    <div id="op-draft-label" style="font-size:12px; color:var(--text-accent); margin:0 0 4px; display:none;"><i class="ti ti-sparkles" style="font-size:14px; vertical-align:-2px;" aria-hidden="true"></i> Návrh — uprav, nebo smaž a napiš vlastní</div>
+    <textarea id="op-text" rows="4" style="width:100%; resize:vertical;" placeholder="Popiš krátce, co se u téhle operace bude dělat — klidně stručně, uprav to pak společně se mnou"></textarea>
+  </div>
+
+  <div style="display:flex; gap:8px; margin-top:1rem;">
+    <button id="prev-op">&larr; Předchozí</button>
+    <button id="skip-op">Nechat prázdné</button>
+    <button id="next-op">Další &rarr;</button>
+  </div>
+
+  <div style="display:flex; gap:8px; margin-top:1.5rem;">
+    <button id="generate" style="display:none; flex:1;">Poslat ke kontrole a zpřesnění ↗</button>
+    <button id="generate-direct" style="display:none; flex:1;"><i class="ti ti-bolt" style="font-size:16px; vertical-align:-2px; margin-right:4px;" aria-hidden="true"></i>Generovat rovnou ↗</button>
+  </div>
+</div>
+</div>
+
+<!-- ======================================================================
+     === DYNAMICKÁ DATA ZAKÁZKY — TOTO uprav při každé nové zakázce ===
+     Claude: cílený str_replace JEN na obsah elementu níže, zbytek souboru nech
+     beze změny. Je to JSON, ne JS kód — uvozovky, apostrofy, zpětná lomítka
+     i diakritika v názvu zakázky se escapují běžnými pravidly JSONu a nic
+     nerozbijí. Jediné navíc: sekvenci  </  piš uvnitř stringu jako  <\/ .
+     Klíče: orderDesc (string), drafts (kód operace → text), preselect (pole
+     kódů v pořadí zadaném uživatelem), tppByOp (kód operace → pole názvů TPP).
+     Prázdný orderDesc znamená "nevyplněno" a widget to napíše.
+     ====================================================================== -->
+<script type="application/json" id="order-data">
+{
+  "orderDesc": "",
+  "drafts": {},
+  "preselect": [],
+  "tppByOp": {}
+}
+</script>
+<!-- ====================== KONEC DYNAMICKÝCH DAT ========================= -->
+
+<script>
+/* ======================================================================
+   STATICKÁ ČÁST — katalog operací a nápovědy. NEMĚNIT mezi zakázkami.
+   ====================================================================== */
+const CATALOG = [
+  ["999031","Skenování"],["999027","Grafická příprava"],["999029","PC příprava programu"],
+  ["999030","Příprava materiálu"],["999035","Seřízení, nastavení"],["999040","NC frézování 3 osá"],
+  ["999041","NC frézování 5 osá"],["999048","Soustružení"],["999049","Soustruh - frézování"],
+  ["999045","Spodní fréza – ruční frézování"],["999050","Kalibrování, kartáčování"],["999052","Broušení"],
+  ["999055","Bubnování"],["999056","Vibrování"],["999053","Laser"],["999060","Kompletace, dokončení, zhotovení"],
+  ["999070","Lakování nebo moření"],["999090","Tisk tampon"],["999092","Tisk digitální dřevo"],
+  ["999160","Vrtání"],["999170","Řezání"],["999200","Výstupní kontrola"],["999002","Malování sochy, obrazy"],
+  ["999011","Šití kompletní (+navazování, balení)"],["999025","Odlití výrobku"]
+];
+const HINTS = {
+  "999027": "Materiál, dostupnost, rozměry, výkres/skica?",
+  "999029": "Nulový bod, nástroje, pořadí operací, CNC program?",
+  "999030": "Úprava materiálu před dalším krokem — krátit, srovnat?",
+  "999035": "Upnutí, korekce nástrojů, kontrola prvního kusu?",
+  "999200": "Kontrola kvality, počtu kusů, zápis, naskladnění?"
+};
+/* ====================== KONEC STATICKÉ ČÁSTI ========================= */
+
+/* ======================================================================
+   Načtení dat zakázky z JSON bloku výše. Sem se needituje — data jsou
+   v JSON elementu s id="order-data" nad tímhle skriptem.
+   ====================================================================== */
+let ORDER = { orderDesc: '', drafts: {}, preselect: [], tppByOp: {} };
+let orderDataOk = false;
+try {
+  const parsed = JSON.parse(document.getElementById('order-data').textContent);
+  if (parsed && typeof parsed.orderDesc === 'string' && parsed.orderDesc.trim() !== '') {
+    ORDER = {
+      orderDesc: parsed.orderDesc,
+      drafts: (parsed.drafts && typeof parsed.drafts === 'object') ? parsed.drafts : {},
+      preselect: Array.isArray(parsed.preselect) ? parsed.preselect : [],
+      tppByOp: (parsed.tppByOp && typeof parsed.tppByOp === 'object') ? parsed.tppByOp : {}
+    };
+    orderDataOk = true;
+  }
+} catch (err) {
+  orderDataOk = false;
+}
+
+document.getElementById('order-desc').textContent = orderDataOk
+  ? ORDER.orderDesc
+  : '⚠ Data zakázky nebyla vyplněna — widget nepoužívej a nech Clauda doplnit blok DYNAMICKÁ DATA ZAKÁZKY.';
+
+let selected = [];
+let current = 0;
+let tppChoice = {};
+
+const searchEl = document.getElementById('search');
+const suggEl = document.getElementById('suggestions');
+const chipsEl = document.getElementById('chips');
+const startBtn = document.getElementById('start-review');
+
+ORDER.preselect.forEach(code => {
+  const found = CATALOG.find(([c]) => c === code);
+  if (found) selected.push([found[0], found[1], ORDER.drafts[code] || '']);
+});
+
+function renderSuggestions(q) {
+  const query = q.trim().toLowerCase();
+  if (!query) { suggEl.style.display = 'none'; suggEl.innerHTML = ''; return; }
+  const matches = CATALOG.filter(([c,n]) => n.toLowerCase().includes(query) || c.includes(query))
+    .filter(([c]) => !selected.find(s => s[0] === c))
+    .slice(0, 8);
+  if (!matches.length) { suggEl.style.display = 'none'; suggEl.innerHTML = ''; return; }
+  suggEl.innerHTML = '';
+  matches.forEach(([c,n]) => {
+    const row = document.createElement('div');
+    row.textContent = c + ' — ' + n;
+    row.style.cssText = 'padding:8px 12px; font-size:14px; cursor:pointer;';
+    row.onmouseenter = () => row.style.background = 'var(--fill-ghost-hover)';
+    row.onmouseleave = () => row.style.background = 'transparent';
+    row.onclick = () => {
+      selected.push([c, n, ORDER.drafts[c] || '']);
+      searchEl.value = '';
+      renderSuggestions('');
+      renderChips();
+    };
+    suggEl.appendChild(row);
+  });
+  suggEl.style.display = 'block';
+}
+
+function moveSelected(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= selected.length) return;
+  [selected[i], selected[j]] = [selected[j], selected[i]];
+  if (current === i) current = j; else if (current === j) current = i;
+}
+
+function renderChips() {
+  chipsEl.innerHTML = '';
+  selected.forEach(([c,n], i) => {
+    const chip = document.createElement('div');
+    chip.style.cssText = 'display:flex; align-items:center; gap:2px; background:var(--bg-accent-muted); border-radius:var(--radius); padding:4px 6px 4px 10px; font-size:13px;';
+    const label = document.createElement('span');
+    label.textContent = (i+1) + '. ' + c + ' ' + n;
+    chip.appendChild(label);
+    const up = document.createElement('i');
+    up.className = 'ti ti-arrow-up';
+    up.style.cssText = 'cursor:pointer; font-size:14px; margin-left:4px;' + (i === 0 ? 'opacity:0.3; pointer-events:none;' : '');
+    up.setAttribute('aria-label', 'Posunout ' + n + ' výš');
+    up.onclick = () => { moveSelected(i, -1); renderChips(); };
+    chip.appendChild(up);
+    const down = document.createElement('i');
+    down.className = 'ti ti-arrow-down';
+    down.style.cssText = 'cursor:pointer; font-size:14px;' + (i === selected.length-1 ? 'opacity:0.3; pointer-events:none;' : '');
+    down.setAttribute('aria-label', 'Posunout ' + n + ' níž');
+    down.onclick = () => { moveSelected(i, 1); renderChips(); };
+    chip.appendChild(down);
+    const x = document.createElement('i');
+    x.className = 'ti ti-x';
+    x.style.cssText = 'cursor:pointer; font-size:14px; margin-left:4px;';
+    x.setAttribute('aria-label', 'Odebrat ' + n);
+    x.onclick = () => { selected.splice(i,1); renderChips(); };
+    chip.appendChild(x);
+    chipsEl.appendChild(chip);
+  });
+  startBtn.style.display = selected.length ? 'inline-block' : 'none';
+}
+
+searchEl.addEventListener('input', e => renderSuggestions(e.target.value));
+
+startBtn.onclick = () => {
+  if (!selected.length) return;
+  current = 0;
+  document.getElementById('step-search').style.display = 'none';
+  document.getElementById('step-review').style.display = 'block';
+  renderStep();
+};
+
+document.getElementById('back-to-search').onclick = () => {
+  document.getElementById('step-review').style.display = 'none';
+  document.getElementById('step-search').style.display = 'block';
+};
+
+function renderOrderStrip() {
+  const strip = document.getElementById('order-strip');
+  strip.innerHTML = '';
+  selected.forEach(([c,n], i) => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'flex-shrink:0; display:flex; align-items:center; gap:2px; border-radius:999px; border: 0.5px solid var(--border-strong); padding: 2px 4px;' +
+      (i === current ? 'background:var(--fill-primary);' : 'background:var(--surface-1);');
+    const up = document.createElement('i');
+    up.className = 'ti ti-chevron-left';
+    up.style.cssText = 'cursor:pointer; font-size:12px; padding:2px;' + (i === 0 ? 'opacity:0.25; pointer-events:none;' : '') +
+      (i === current ? 'color:var(--on-primary);' : 'color:var(--text-secondary);');
+    up.setAttribute('aria-label', 'Posunout operaci ' + c + ' dřív');
+    up.onclick = (ev) => { ev.stopPropagation(); moveSelected(i, -1); renderStep(); };
+    wrap.appendChild(up);
+    const pill = document.createElement('span');
+    pill.textContent = (i+1) + '. ' + c;
+    pill.style.cssText = 'padding:2px 4px; font-size:12px; cursor:pointer;' +
+      (i === current ? 'color:var(--on-primary);' : 'color:var(--text-secondary);');
+    pill.onclick = () => { current = i; renderStep(); };
+    wrap.appendChild(pill);
+    const down = document.createElement('i');
+    down.className = 'ti ti-chevron-right';
+    down.style.cssText = 'cursor:pointer; font-size:12px; padding:2px;' + (i === selected.length-1 ? 'opacity:0.25; pointer-events:none;' : '') +
+      (i === current ? 'color:var(--on-primary);' : 'color:var(--text-secondary);');
+    down.setAttribute('aria-label', 'Posunout operaci ' + c + ' později');
+    down.onclick = (ev) => { ev.stopPropagation(); moveSelected(i, 1); renderStep(); };
+    wrap.appendChild(down);
+    strip.appendChild(wrap);
+  });
+}
+
+function renderTppBlock(code) {
+  const block = document.getElementById('tpp-block');
+  const options = ORDER.tppByOp[code];
+  const tppSearch = document.getElementById('tpp-search');
+  const tppSugg = document.getElementById('tpp-suggestions');
+  const tppSelected = document.getElementById('tpp-selected');
+  tppSearch.value = '';
+  tppSugg.style.display = 'none';
+  if (!options) { block.style.display = 'none'; return; }
+  block.style.display = 'block';
+  const chosen = tppChoice[code];
+  if (chosen) {
+    tppSelected.style.display = 'flex';
+    tppSelected.textContent = '';
+    const linkIcon = document.createElement('i');
+    linkIcon.className = 'ti ti-link';
+    linkIcon.style.fontSize = '14px';
+    linkIcon.setAttribute('aria-hidden', 'true');
+    const label = document.createElement('span');
+    label.textContent = chosen;
+    tppSelected.appendChild(linkIcon);
+    tppSelected.appendChild(label);
+    const x = document.createElement('i');
+    x.className = 'ti ti-x';
+    x.style.cssText = 'cursor:pointer; margin-left:4px;';
+    x.onclick = () => { delete tppChoice[code]; renderTppBlock(code); };
+    tppSelected.appendChild(x);
+  } else {
+    tppSelected.style.display = 'none';
+  }
+  tppSearch.oninput = (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    if (!q) { tppSugg.style.display = 'none'; tppSugg.innerHTML=''; return; }
+    const matches = options.filter(o => o.toLowerCase().includes(q)).slice(0,6);
+    tppSugg.innerHTML = '';
+    if (!matches.length) { tppSugg.style.display = 'none'; return; }
+    matches.forEach(m => {
+      const row = document.createElement('div');
+      row.textContent = m;
+      row.style.cssText = 'padding:8px 12px; font-size:13px; cursor:pointer;';
+      row.onmouseenter = () => row.style.background = 'var(--fill-ghost-hover)';
+      row.onmouseleave = () => row.style.background = 'transparent';
+      row.onclick = () => { tppChoice[code] = m; renderTppBlock(code); };
+      tppSugg.appendChild(row);
+    });
+    tppSugg.style.display = 'block';
+  };
+}
+
+function renderStep() {
+  const [c,n,t] = selected[current];
+  renderOrderStrip();
+  document.getElementById('progress').textContent = (current+1) + ' / ' + selected.length;
+  document.getElementById('op-title').textContent = (current+1) + '. ' + c + ' ' + n;
+  document.getElementById('op-hint').textContent = HINTS[c] || 'Popiš krátce, co se u téhle operace bude dělat (nebo nech prázdné).';
+  document.getElementById('op-text').value = t || '';
+  document.getElementById('op-draft-label').style.display = (ORDER.drafts[c] && t === ORDER.drafts[c]) ? 'block' : 'none';
+  document.getElementById('prev-op').disabled = current === 0;
+  renderTppBlock(c);
+  const genBtn = document.getElementById('generate');
+  const genDirectBtn = document.getElementById('generate-direct');
+  const isLast = current === selected.length - 1;
+  genBtn.style.display = isLast ? 'inline-block' : 'none';
+  genDirectBtn.style.display = isLast ? 'inline-block' : 'none';
+}
+
+document.getElementById('op-text').addEventListener('input', e => {
+  selected[current][2] = e.target.value;
+  const c = selected[current][0];
+  document.getElementById('op-draft-label').style.display = (ORDER.drafts[c] && e.target.value === ORDER.drafts[c]) ? 'block' : 'none';
+});
+
+document.getElementById('prev-op').onclick = () => { if (current>0) { current--; renderStep(); } };
+document.getElementById('skip-op').onclick = () => {
+  selected[current][2] = '';
+  if (current < selected.length-1) { current++; renderStep(); } else { renderStep(); }
+};
+document.getElementById('next-op').onclick = () => {
+  if (current < selected.length-1) { current++; renderStep(); }
+};
+
+function buildOpsMessage() {
+  let lines = '';
+  selected.forEach(([c,n,t], i) => {
+    lines += (i+1) + '. ' + c + ' ' + n;
+    if (tppChoice[c]) lines += ' [TPP: ' + tppChoice[c] + ']';
+    lines += t ? (' — poznámka: ' + t) : ' — (bez poznámky, doplň stručně sám/nebo nech prázdné)';
+    lines += '\n';
+  });
+  return lines;
+}
+
+document.getElementById('generate').onclick = () => {
+  const msg = 'Mám hrubé, možná neuspořádané poznámky k operacím pro technologický postup — projdi je, oprav, strukturuj a ukaž mi náhled před finálním generováním. Pořadí operací dodrž takhle:\n\n' + buildOpsMessage();
+  sendPrompt(msg);
+};
+
+document.getElementById('generate-direct').onclick = () => {
+  const msg = 'Poznámky k operacím jsou hotové a schválené — přeskoč kontrolní náhled a rovnou vygeneruj finální .docx dokument. Pořadí operací dodrž takhle:\n\n' + buildOpsMessage();
+  sendPrompt(msg);
+};
+
+renderChips();
+</script>

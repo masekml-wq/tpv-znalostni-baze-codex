@@ -1,0 +1,11 @@
+{
+  "_pouziti": "Zkratka kategorie -> PŘESNÝ název podsložky v <library_root>/<tpp_dir>/. Hodnota se používá 1:1 při sestavování cesty, nespojuj ji se zkratkou znovu. Když na disku přibude kategorie, doplň ji sem; zdrojem pravdy je disk, ne tento soubor.",
+  "PM": "PM Příprava materiálu",
+  "OBR": "OBR Obrábění",
+  "PU": "PU Povrchová úprava",
+  "M": "M Malování",
+  "MO": "MO Modelování - grafická příprava",
+  "O": "O Odlévání",
+  "L": "L Laser",
+  "T": "T Tisk"
+}

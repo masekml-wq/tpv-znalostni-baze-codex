@@ -1,0 +1,19 @@
+{
+  "skill_version": "1b",
+
+  "library_root": "U:\\Registr\\Směrnice\\T Technické Výrobní směrnice",
+  "tpp_dir": "TPP Typizovane pracovni postupy",
+  "index_file": "INDEX.md",
+  "context_notes_file": "poznamky-kontext.md",
+
+  "general_kb_root": "U:\\Registr\\Směrnice",
+  "general_kb_index_file": "INDEX-smernice.md",
+  "general_kb_excluded_dirs": [
+    "THN Technicko hospodářské směrnice"
+  ],
+  "general_kb_thn_allowlist": [
+    "THN.1.1 Normativy pro výrobu.xls"
+  ],
+
+  "docx_template": "U:\\Registr\\Směrnice\\T Technické Výrobní směrnice\\T.1.3.1B Vzor technologického postupu wordpad - word s makry - šablona_V2.dotm"
+}

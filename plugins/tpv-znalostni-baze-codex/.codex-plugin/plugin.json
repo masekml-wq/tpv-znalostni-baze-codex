@@ -1,0 +1,25 @@
+{
+  "name": "tpv-znalostni-baze-codex",
+  "version": "0.1.0",
+  "description": "Interní znalostní báze TPV, technologických postupů, směrnic a školení firmy Mašek.",
+  "author": {
+    "name": "Mašek – umělecká výroba"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "TPV znalostní báze",
+    "shortDescription": "Technologické postupy, směrnice a školení firmy Mašek.",
+    "longDescription": "Lokální znalostní plugin pro vyhledávání, tvorbu, revizi a správu technologických postupů a interních směrnic firmy Mašek.",
+    "developerName": "Mašek – umělecká výroba",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Najdi existující technologický postup.",
+      "Pomoz mi sestavit technologický postup.",
+      "Vyhledej informaci v interní směrnici."
+    ]
+  }
+}

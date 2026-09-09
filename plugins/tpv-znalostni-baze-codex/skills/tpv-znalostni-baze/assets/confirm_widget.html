@@ -1,0 +1,8 @@
+<div style="display:flex; gap:8px; padding:1rem 0;">
+  <button id="confirm-ok" style="flex:1;"><i class="ti ti-check" style="font-size:16px; vertical-align:-2px; margin-right:6px;" aria-hidden="true"></i>Vypadá dobře, generovat</button>
+  <button id="confirm-edit" style="flex:1;"><i class="ti ti-edit" style="font-size:16px; vertical-align:-2px; margin-right:6px;" aria-hidden="true"></i>Ještě upravit operace</button>
+</div>
+<script>
+document.getElementById('confirm-ok').onclick = () => sendPrompt('Náhled je v pořádku, vygeneruj finální .docx dokument.');
+document.getElementById('confirm-edit').onclick = () => sendPrompt('Chci ještě upravit operace — otevři znovu průvodce se stejnými operacemi, pořadím a texty jako naposled, ať je můžu rovnou doladit.');
+</script>
